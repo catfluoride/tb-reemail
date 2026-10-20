@@ -67,7 +67,7 @@ It is an experimental, AI-generated project, not a professionally audited or gua
 
 ## License
 
-Mozilla Public License 2.0 — see [LICENSE](LICENSE).
+GNU General Public License, version 3 only (`GPL-3.0-only`) — see [LICENSE](LICENSE).
 
 ## References
 
