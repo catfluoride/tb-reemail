@@ -1,11 +1,11 @@
-name: Publish experimental XPI
+name: Publish experimental XPI v0.5.0
 
 on:
   push:
     branches: [main]
     paths:
-      - 'dist/caldav-email-valarm-0.4.0.xpi'
-      - 'dist/caldav-email-valarm-0.4.0.xpi.sha256'
+      - 'dist/tb-reemail-0.5.0.xpi'
+      - 'dist/tb-reemail-0.5.0.xpi.sha256'
   workflow_dispatch:
 
 permissions:
@@ -15,20 +15,23 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out source
+      - name: Checkout source
         uses: actions/checkout@v4
-      - name: Verify XPI checksum
-        run: cd dist && sha256sum -c caldav-email-valarm-0.4.0.xpi.sha256
-      - name: Publish v0.4.0 pre-release
+      - name: Validate JavaScript and tests
+        run: |
+          node --check background.js
+          node --check api/implementation.js
+          node tests/test.cjs
+          node tests/quick.cjs
+      - name: Verify published XPI checksum
+        run: cd dist && sha256sum -c tb-reemail-0.5.0.xpi.sha256
+      - name: Publish or update v0.5.0 prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view v0.4.0 >/dev/null 2>&1; then
-            echo 'Release v0.4.0 already exists; refreshing binary and checksum.'
-            gh release upload v0.4.0 --clobber dist/caldav-email-valarm-0.4.0.xpi dist/caldav-email-valarm-0.4.0.xpi.sha256
+          if gh release view v0.5.0 >/dev/null 2>&1; then
+            gh release upload v0.5.0 --clobber dist/tb-reemail-0.5.0.xpi dist/tb-reemail-0.5.0.xpi.sha256
           else
-            gh release create v0.4.0 dist/caldav-email-valarm-0.4.0.xpi dist/caldav-email-valarm-0.4.0.xpi.sha256 \
-              --target "$GITHUB_SHA" --prerelease \
-              --title 'v0.4.0 (experimental)' --notes-file RELEASE_NOTES.md
+            gh release create v0.5.0 dist/tb-reemail-0.5.0.xpi dist/tb-reemail-0.5.0.xpi.sha256 --target "$GITHUB_SHA" --prerelease --title "v0.5.0 (experimental)" --notes-file RELEASE_NOTES.md
           fi
