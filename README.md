@@ -59,6 +59,12 @@ To create a new XPI from this source for future versions:
 zip -r new-build.xpi manifest.json background.js api/ README.md
 ```
 
+## Development and credits
+
+This extension is **entirely vibe coded**. [ChatGPT (OpenAI)](https://chatgpt.com/) contributed the extension code, debugging iterations, tests, packaging, and documentation, guided by [@catfluoride](https://github.com/catfluoride), who supplied the requirements and tested the prototypes.
+
+It is an experimental, AI-generated project, not a professionally audited or guaranteed solution. **If you don't like it, you can just ignore it.**
+
 ## License
 
 Mozilla Public License 2.0 — see [LICENSE](LICENSE).
