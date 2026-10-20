@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - '.tb-reemail-v050.tar.xz'
+      - '.tb-reemail-v050-retry.txt'
   workflow_dispatch:
 
 permissions:
@@ -20,8 +21,8 @@ jobs:
         run: |
           set -euo pipefail
           test -f .tb-reemail-v050.tar.xz
-          tar -xJf .tb-reemail-v050.tar.xz
-          rm .tb-reemail-v050.tar.xz .github/workflows/import-v050.yml
+          tar -xJf .tb-reemail-v050.tar.xz --exclude='./.github/workflows/release.yml'
+          rm -f .tb-reemail-v050.tar.xz .tb-reemail-v050-retry.txt
           node --check background.js
           node --check api/implementation.js
           node tests/test.cjs
