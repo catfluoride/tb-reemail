@@ -1,80 +1,81 @@
 # tb-reemail
 
-**CalDAV EMAIL VALARM editor for Thunderbird / Betterbird 140+.**
+**Thunderbird / Betterbird CalDAV email reminders.** Version **0.5.0** (experimental; Thunderbird 140+).
 
-Version **0.4.0** — **experimental; not yet verified in a live Betterbird/Thunderbird instance or against a CalDAV server.**
+This MailExtension Experiment exposes the native iCalendar `VALARM` action `EMAIL` for writable CalDAV event calendars. It creates RFC 5545 email alarms in the event; **your CalDAV server must deliver the emails**. It does not send mail directly.
 
-The source and XPI are the previously built v0.4.0 developer prototype. This repository package only adds publication materials (license, checksum, release notes, and publishing script); it does not change the extension's executable files.
+## What's new in v0.5.0
 
-## What it does
+The event editor's **Reminder** dropdown now includes **Email reminder…**. You can configure a single email reminder directly in the editor without navigating through **Custom…**.
 
-Adds an **email reminder** action to the existing Thunderbird/Betterbird calendar event editor for writable CalDAV calendars. Standard popup alarms remain available. A newly created `ACTION:EMAIL` reminder contains a trigger, one or more recipient `ATTENDEE` addresses, a `SUMMARY`, and a `DESCRIPTION` in the event’s iCalendar `VALARM`. The CalDAV server, not the extension, must send any emails.
+The inline controls let you set:
 
-## Install
+- One or more recipients, separated by commas.
+- Minutes before the event starts (default 15, maximum 90 days).
+- Optional subject and message. Blank values use defaults based on the event title.
 
-Download `caldav-email-valarm-0.4.0.xpi` from the GitHub v0.4.0 release, or use the copy at [`dist/caldav-email-valarm-0.4.0.xpi`](dist/caldav-email-valarm-0.4.0.xpi). In Thunderbird/Betterbird, open Add-ons and Themes → gear → Install Add-on From File.
+The existing **Custom…** dialog is still available for combining popup and email alarms, unusual trigger times, and multiple alarms. An existing single EMAIL alarm with a relative whole-minute trigger before event start is recognized as **Email reminder…** when you reopen an event; other alarms remain under Custom.
 
-The extension uses a privileged MailExtension Experiment and needs unrestricted Thunderbird access. Review the source before installing.
+## Installation
 
-## Usage
+1. Download `tb-reemail-0.5.0.xpi`.
+2. Thunderbird/Betterbird → **Add-ons and Themes** (`Ctrl+Shift+A`) → gear → **Install Add-on From File…**.
+3. Choose the XPI, review the unrestricted-access permission and restart Thunderbird/Betterbird.
+4. Disable or replace v0.4.0; this package uses the same extension ID, so Thunderbird should treat it as an update.
 
-1. Create a test event in a **writable CalDAV** calendar.
-2. Open **Reminder → Custom**.
-3. Click **Add** if you want to keep the existing popup reminder. Under **Choose a Reminder Action**, select **Send an Email**. Enter one or more recipient addresses separated by commas, and optionally edit the subject and message.
-4. Save the reminder and event.
-5. Inspect the Error Console (`Ctrl+Shift+J`) for `[VALARM editor]` logs. Reopen the event to check that the email reminder is retained. If your server allows access to the event’s `.ics`, verify that its `VALARM` contains `ACTION:EMAIL` and `ATTENDEE:mailto:...`.
+The extension needs privileged Thunderbird internals; its unrestricted-access permission is inherent to a MailExtension Experiment. Review the source before installing.
 
-The CalDAV server **must** support and send email alarms. Thunderbird does **not** send the reminder emails. Even if Betterbird accepts the alarm, the CalDAV server may reject or discard it. Test with disposable events.
+## Usage (quick email reminder)
 
-## Implementation
+1. Create an event in a **writable native CalDAV** calendar.
+2. In the standard **Reminder** dropdown, select **Email reminder…**.
+3. Enter recipient addresses and optionally change the number of minutes, subject, and message.
+4. Save the event. Invalid recipient addresses or out-of-range lead times block the editor's Save and Save & Close commands.
+5. Reopen the event to check the setting. If possible, inspect the server's `.ics` representation to verify that it contains `BEGIN:VALARM`, `ACTION:EMAIL`, `SUMMARY`, `DESCRIPTION`, and one or more `ATTENDEE:mailto:` entries.
 
-- Privileged window hook shows the native `EMAIL` alarm action and adds recipient, subject, and message fields.
-- Editor hook attempts to restore RFC 5545 `ACTION:EMAIL` alarms after Thunderbird's normal capability filtering.
-- Normal `DISPLAY` alarms remain available.
-- Restricted to writable CalDAV calendars (the provider must identify itself as `caldav`).
-- Editing and persistence across a real CalDAV server are **not** yet validated.
+Normal DISPLAY reminders remain available. If you need **both** a popup and an email alarm, use **Reminder → Custom…** and add a second alarm in the native reminder dialog.
+
+## What it does not do
+
+- It cannot make CalDAV servers send email alarms if they do not support `ACTION:EMAIL`.
+- It does not send messages through Thunderbird, SMTP, or any third-party service.
+- It does not guarantee that a CalDAV server will preserve the alarm after synchronization.
+- It cannot guarantee compatibility with all Thunderbird / Betterbird versions, as private editor APIs can change.
 
 ## Troubleshooting
 
-- **No “Send an Email” action:** make sure the calendar is writable, is a native CalDAV calendar, and the extension is enabled. Restart Thunderbird/Betterbird and check the Error Console for `[VALARM editor]`.
-- **Email action appears but disappears after saving:** look for `Editor save hook available: false` or related errors. This version uses privileged internal editor functions that may differ across versions.
-- **Alarm persists but no email arrives:** check whether your CalDAV server supports server-side `EMAIL` alarms. Thunderbird does not deliver them.
-- **Permission prompt:** this uses a privileged MailExtension Experiment; it requests unrestricted Thunderbird access.
+- **No Email reminder option**: confirm writable `caldav` calendar, extension enabled, and restart. Check the Error Console (`Ctrl+Shift+J`) for `[VALARM editor]`.
+- **Email option appears but doesn't survive Save**: check the Error Console for `[VALARM editor] Editor save...`; capture event `.ics` before and after server sync.
+- **Alarm is stored but no email arrives**: the CalDAV server must implement email alarms and actually deliver the message.
+- **Only Custom appears when reopening an event**: triggers other than whole minutes before event start, absolute alarms, and multiple simultaneous alarms intentionally remain under Custom.
 
-## Test / build
+## Development and testing
 
-JavaScript syntax checks:
+The project is **entirely vibe coded**. [ChatGPT (OpenAI)](https://chatgpt.com/) contributed code, tests, packaging and documentation, guided by [@catfluoride](https://github.com/catfluoride), who specified requirements and tested earlier builds. It is experimental and not independently audited. **If you don't like it, you can just ignore it.**
 
-```sh
+Source tests:
+
+```bash
 node --check background.js
 node --check api/implementation.js
 node tests/test.cjs
+node tests/quick.cjs
 ```
 
-The bundled `dist/caldav-email-valarm-0.4.0.xpi` is the unchanged, previously packaged developer XPI. See `dist/*.sha256` for its checksum. The original XPI contains `manifest.json`, `background.js`, `api/`, and the original README; it does not contain the extra GitHub publishing materials.
+Package from the project root:
 
-To create a new XPI from this source for future versions:
-
-```sh
-zip -r new-build.xpi manifest.json background.js api/ README.md
+```bash
+zip -r tb-reemail-0.5.0.xpi manifest.json background.js api/ README.md LICENSE
 ```
 
-## Development and credits
-
-This extension is **entirely vibe coded**. [ChatGPT (OpenAI)](https://chatgpt.com/) contributed the extension code, debugging iterations, tests, packaging, and documentation, guided by [@catfluoride](https://github.com/catfluoride), who supplied the requirements and tested the prototypes.
-
-It is an experimental, AI-generated project, not a professionally audited or guaranteed solution. **If you don't like it, you can just ignore it.**
+**Test status**: syntax checks and mocked behavior tests pass. This exact version has *not* been tested in a live Thunderbird/Betterbird or against a CalDAV server. Test on disposable events before using it for important reminders.
 
 ## License
 
-GNU General Public License, version 3 only (`GPL-3.0-only`) — see [LICENSE](LICENSE).
+GNU General Public License v3.0 only (`GPL-3.0-only`). See [LICENSE](LICENSE).
 
-## References
+## Sources
 
-- [Thunderbird MailExtension Experiments](https://developer.thunderbird.net/add-ons/mailextensions/experiments)
-- [Calendar reminder implementation](https://searchfox.org/comm-central/source/calendar/base/content/dialogs/calendar-event-dialog-reminder.js)
-- [RFC 5545 VALARM](https://www.rfc-editor.org/rfc/rfc5545.html#section-3.6.6)
-
-## Publishing
-
-The repository includes `.github/workflows/release.yml`. After its binary and checksum files are committed to `main`, the workflow checks the checksum and attempts to publish them as a prerelease at `v0.4.0`. It needs GitHub Actions to be enabled and the workflow `GITHUB_TOKEN` to have `contents: write` permission. You can also use `scripts/publish.sh` with an authenticated GitHub CLI to create the public repository, tag and release together.
+- [Thunderbird event editor](https://searchfox.org/comm-central/source/calendar/base/content/item-editing/calendar-item-iframe.xhtml)
+- [Thunderbird reminder functions](https://searchfox.org/comm-central/source/calendar/base/content/dialogs/calendar-dialog-utils.js)
+- [RFC 5545 section 3.6.6, VALARM](https://www.rfc-editor.org/rfc/rfc5545#section-3.6.6)

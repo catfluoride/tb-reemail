@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "CalDAV Email VALARM Editor",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Adds an email reminder action to the native calendar reminder dialog for writable CalDAV calendars; the server must send the emails.",
   "applications": {"gecko": {"id": "caldav-email-valarm@local.addon", "strict_min_version": "140.0"}},
   "background": {"scripts": ["background.js"]},

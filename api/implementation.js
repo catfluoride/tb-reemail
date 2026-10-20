@@ -1,4 +1,4 @@
-/* CalDAV Email VALARM Editor 0.4.0 - GPL-3.0-only
+/* CalDAV Email VALARM Editor 0.5.0 - GPL-3.0-only
  * MailExtension Experiment for Betterbird / Thunderbird.
  * Does not send email, alter credentials, or contact servers directly.
  * Based on the native 2026 calendar reminder dialog and editor save paths.
@@ -18,6 +18,10 @@ const WINDOW_URLS = [
   "chrome://messenger/content/messenger.xhtml",
 ];
 const HTML_NS = "http://www.w3.org/1999/xhtml";
+const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+const QUICK_VALUE = "tb-reemail";
+const QUICK_ID = "tb-reemail-shortcut";
+const MAX_LEAD_MINUTES = 60 * 24 * 90;
 const TAG = "[VALARM editor]";
 
 function writableCalDAV(calendar) {
@@ -68,10 +72,15 @@ function applyEmailFields(alarm, data, title) {
  * A detached immutable clone is returned by saveItem(); modify that clone
  * before Thunderbird makes it immutable and dispatches CalDAV synchronization.
  */
+/**
+ * Native menu presets assume DISPLAY, so we attach a configured alarm to our
+ * own menuitem. The native save routine still filters EMAIL from DISPLAY-only
+ * calendars; patch saveItem to restore that one alarm on the mutable clone.
+ */
 function patchEditor(win, cleanup) {
   try {
     if (!win || win.document?.location?.href !== EDITOR_URL || typeof win.saveItem !== "function") return false;
-    if (win.__valarm04EditorPatch) return true;
+    if (win.__valarm05EditorPatch) return true;
     const selector = win.document.querySelector(".item-alarm");
     if (!selector) {
       console.warn(TAG, "Editor iframe detected but .item-alarm is absent");
@@ -79,18 +88,24 @@ function patchEditor(win, cleanup) {
     }
     const original = win.saveItem;
     const patched = function (...args) {
+      const quick = win.__valarm05Quick;
+      if (selector.value === QUICK_VALUE && quick && !quick.prepare(true)) {
+        throw new Error("Please correct the Email reminder settings before saving.");
+      }
       const item = original.apply(this, args);
       if (!writableCalDAV(item?.calendar)) return item;
       const choice = win.document.querySelector(".item-alarm");
-      if (choice?.value !== "custom") return item; // respects explicit removal
-      const alarms = choice.querySelector(".reminder-custom-menuitem")?.reminders;
+      if (choice?.value !== "custom" && choice?.value !== QUICK_VALUE) return item;
+      const alarms = choice.value === "custom"
+        ? choice.querySelector(".reminder-custom-menuitem")?.reminders
+        : choice.selectedItem?.reminders;
       if (!alarms) return item;
       const current = new Set(item.getAlarms().map(a => a.icalString));
       let added = 0;
       for (const alarm of alarms) {
         if (alarm?.action !== "EMAIL") continue;
         try {
-          const value = alarm.icalString; // fail visibly in logs if malformed
+          const value = alarm.icalString;
           if (!current.has(value)) {
             item.addAlarm(alarm.clone());
             current.add(value);
@@ -105,10 +120,10 @@ function patchEditor(win, cleanup) {
       return item;
     };
     win.saveItem = patched;
-    win.__valarm04EditorPatch = true;
+    win.__valarm05EditorPatch = true;
     const dispose = () => {
       if (win.saveItem === patched) win.saveItem = original;
-      delete win.__valarm04EditorPatch;
+      delete win.__valarm05EditorPatch;
     };
     cleanup.set(win, dispose);
     win.addEventListener("unload", dispose, { once: true });
@@ -119,6 +134,210 @@ function patchEditor(win, cleanup) {
     return false;
   }
 }
+
+/** Build one valid EMAIL alarm from the editor's quick fields. */
+function createQuickAlarm(win, menuitem, data, title, calendar) {
+  if (!writableCalDAV(calendar)) throw new Error("Select a writable CalDAV calendar.");
+  const lead = Number(data.lead);
+  if (!Number.isSafeInteger(lead) || lead < 0 || lead > MAX_LEAD_MINUTES) {
+    throw new Error("Lead time must be between 0 and 129600 minutes (90 days).");
+  }
+  // This is Thunderbird's own preset creator, giving the correct calIDuration
+  // and START/END relation. EMAIL is set after it creates a DISPLAY alarm.
+  menuitem.setAttribute("unit", "minutes");
+  menuitem.setAttribute("length", String(lead));
+  menuitem.setAttribute("origin", "before");
+  menuitem.setAttribute("relation", "START");
+  if (typeof win.createReminderFromMenuitem !== "function") {
+    throw new Error("Thunderbird preset alarm creator is unavailable.");
+  }
+  const alarm = win.createReminderFromMenuitem(menuitem, calendar);
+  return applyEmailFields(alarm, data, title);
+}
+
+/** The shortcut only represents relative, whole-minute alarms before START.
+ * Leave absolute, after-event, and sub-minute alarms in native Custom… .
+ */
+function isQuickCompatibleAlarm(alarm) {
+  if (!alarm || alarm.action !== "EMAIL" || !alarm.offset) return false;
+  if (typeof Ci !== "undefined" &&
+      alarm.related !== Ci.calIAlarm.ALARM_RELATED_START) return false;
+  const seconds = alarm.offset.inSeconds;
+  if (!Number.isFinite(seconds) || seconds > 0 || seconds % 60 !== 0) return false;
+  return Math.abs(seconds) <= MAX_LEAD_MINUTES * 60;
+}
+
+/** Add a first-class choice to the main event Reminder dropdown.
+ * The small inline form avoids entering the Custom reminder dialog.
+ */
+function installQuickReminder(win, cleanup) {
+  try {
+    if (win.__valarm05Quick) return true;
+    const doc = win.document;
+    const selector = doc.querySelector(".item-alarm");
+    const popup = selector?.menupopup || doc.getElementById("item-alarm-menupopup");
+    const custom = selector?.querySelector(".reminder-custom-menuitem");
+    if (!selector || !popup || !custom || !win.calendarItem) return false;
+    if (!win.calendarItem.isEvent?.()) return false;
+
+    const item = doc.createElementNS(XUL_NS, "menuitem");
+    item.id = QUICK_ID;
+    item.setAttribute("label", "Email reminder…");
+    item.setAttribute("value", QUICK_VALUE);
+    item.setAttribute("unit", "minutes");
+    item.setAttribute("length", "15");
+    item.setAttribute("origin", "before");
+    item.setAttribute("relation", "START");
+    item.reminders = [];
+    popup.insertBefore(item, custom); // just before Custom…, leave native presets intact
+
+    const box = doc.createElementNS(HTML_NS, "div");
+    box.id = "tb-reemail-quick-fields";
+    box.style.cssText = "display:none;margin:8px 0;padding:9px;border:1px solid ThreeDShadow;border-radius:4px;max-width:540px;background:Field;color:FieldText";
+    const label = (title, ctrl) => {
+      const wrapper = doc.createElementNS(HTML_NS, "label");
+      wrapper.style.cssText = "display:block;margin-bottom:6px;font-size:inherit;";
+      const caption = doc.createElementNS(HTML_NS, "span");
+      caption.textContent = title;
+      caption.style.cssText = "display:block;margin-bottom:2px;";
+      wrapper.append(caption, ctrl);
+      box.appendChild(wrapper);
+      return ctrl;
+    };
+    const field = (placeholder = "") => {
+      const input = doc.createElementNS(HTML_NS, "input");
+      input.type = "text";
+      input.placeholder = placeholder;
+      input.style.cssText = "width:100%;min-width:180px;box-sizing:border-box;padding:4px;font:inherit;background:Field;color:FieldText;border:1px solid ThreeDShadow;";
+      return input;
+    };
+    const recipients = label("Email recipients (comma-separated)", field("name@example.com"));
+    const lead = field();
+    lead.type = "number";
+    lead.min = "0";
+    lead.max = String(MAX_LEAD_MINUTES);
+    lead.step = "1";
+    lead.value = "15";
+    label("Minutes before event starts", lead);
+    const subject = label("Subject (optional)", field("Reminder: event title"));
+    const body = label("Message (optional)", field("Upcoming event"));
+    const status = doc.createElementNS(HTML_NS, "div");
+    status.setAttribute("role", "alert");
+    status.style.cssText = "font-size:smaller;white-space:pre-wrap;color:var(--in-content-danger-button-background,#b22);";
+    box.appendChild(status);
+    const note = doc.createElementNS(HTML_NS, "small");
+    note.textContent = "The CalDAV server must send the email. This extension only writes VALARM.";
+    box.appendChild(note);
+    const anchor = doc.getElementById("event-grid-alarm-picker-box") || selector.parentNode;
+    anchor.parentNode.insertBefore(box, anchor.nextSibling);
+
+    let lastCalendar = null;
+    const calendar = () => typeof win.getCurrentCalendar === "function"
+      ? win.getCurrentCalendar() : win.calendarItem?.calendar;
+    const read = () => ({recipients:recipients.value, lead:lead.value, subject:subject.value, body:body.value});
+    function prepare(showError = false) {
+      if (selector.value !== QUICK_VALUE) return true;
+      try {
+        item.reminders = [createQuickAlarm(win, item, read(),
+          doc.getElementById("item-title")?.value || win.calendarItem?.title, calendar())];
+        status.textContent = "";
+        return true;
+      } catch (e) {
+        item.reminders = [];
+        status.textContent = showError ? String(e.message || e) : "";
+        if (showError) { box.style.display = "block"; recipients.focus(); }
+        return false;
+      }
+    }
+    function syncFromItem() {
+      const c = calendar();
+      const writable = writableCalDAV(c) && win.calendarItem?.isEvent?.();
+      item.hidden = !writable;
+      if (!writable) {
+        box.style.display = "none";
+        return;
+      }
+      const alarms = win.calendarItem.getAlarms();
+      if (alarms.length === 1 && isQuickCompatibleAlarm(alarms[0])) {
+        // Recognize a previously saved single EMAIL alarm. Thunderbird would
+        // otherwise put it under Custom… because DISPLAY is its default.
+        const existing = alarms[0];
+        const fields = emailData(existing);
+        recipients.value = fields.recipients;
+        subject.value = fields.subject;
+        body.value = fields.body;
+        const seconds = Math.abs(existing.offset?.inSeconds ?? 900);
+        lead.value = String(Math.round(seconds / 60));
+        item.reminders = [existing.clone()];
+        selector.selectedItem = item;
+        selector.value = QUICK_VALUE;
+        win.gLastAlarmSelection = selector.selectedIndex;
+        console.info(TAG, "Recognized saved EMAIL reminder in main dropdown");
+      }
+      show();
+    }
+    function show() {
+      const writable = writableCalDAV(calendar());
+      item.hidden = !writable;
+      if (!writable && selector.value === QUICK_VALUE) {
+        selector.value = "none";
+        item.reminders = [];
+      }
+      box.style.display = writable && selector.value === QUICK_VALUE ? "block" : "none";
+      if (selector.value === QUICK_VALUE && writable) prepare(false);
+    }
+    const onCommand = () => {
+      if (selector.value === QUICK_VALUE && lastCalendar !== calendar()) {
+        lastCalendar = calendar();
+      }
+      show();
+    };
+    const onInput = () => prepare(false);
+    selector.addEventListener("command", onCommand);
+    for (const field of [recipients, lead, subject, body]) field.addEventListener("input", onInput);
+    const calendarPicker = doc.getElementById("item-calendar");
+    calendarPicker?.addEventListener("command", show);
+
+    // Prevent native Save or Save & Close from proceeding with invalid data.
+    // onAccept() otherwise disposes the editor even if saveItem() throws.
+    const originalSaveCommand = win.onCommandSave;
+    const originalAccept = win.onAccept;
+    if (typeof originalSaveCommand === "function") {
+      win.onCommandSave = function (...args) {
+        if (!prepare(true)) return false;
+        return originalSaveCommand.apply(this, args);
+      };
+    }
+    if (typeof originalAccept === "function") {
+      win.onAccept = function (...args) {
+        if (!prepare(true)) return false;
+        return originalAccept.apply(this, args);
+      };
+    }
+    const quick = {prepare, show, syncFromItem};
+    win.__valarm05Quick = quick;
+    const dispose = () => {
+      selector.removeEventListener("command", onCommand);
+      for (const field of [recipients, lead, subject, body]) field.removeEventListener("input", onInput);
+      calendarPicker?.removeEventListener("command", show);
+      if (win.onCommandSave !== originalSaveCommand) win.onCommandSave = originalSaveCommand;
+      if (win.onAccept !== originalAccept) win.onAccept = originalAccept;
+      delete win.__valarm05Quick;
+      box.remove();
+      item.remove();
+    };
+    const prior = cleanup.get(win);
+    cleanup.set(win, () => {dispose(); prior?.();});
+    win.addEventListener("unload", dispose, {once: true});
+    syncFromItem();
+    console.info(TAG, "Email reminder shortcut installed in main editor dropdown");
+    return true;
+  } catch (e) {
+    console.error(TAG, "Quick reminder integration failed", e, e?.stack);
+    return false;
+  }
+}
+
 function findEditors(root, cleanup) {
   if (!root) return false;
   let found = false;
@@ -127,7 +346,10 @@ function findEditors(root, cleanup) {
     if (!win || visited.has(win) || depth > 5) return;
     visited.add(win);
     try {
-      if (patchEditor(win, cleanup)) found = true;
+      if (patchEditor(win, cleanup)) {
+        found = true;
+        installQuickReminder(win, cleanup);
+      }
       for (const frame of win.document.querySelectorAll("iframe, browser")) {
         try {
           if (frame.contentWindow) traverse(frame.contentWindow, depth + 1);
@@ -161,7 +383,7 @@ function monitorEditors(root, cleanup) {
 function addEmailUI(win, cleanup) {
   try {
     const doc = win.document;
-    if (doc.getElementById("valarm04-email-panel")) return;
+    if (doc.getElementById("valarm05-email-panel")) return;
     const args = win.arguments?.[0];
     if (!args || !writableCalDAV(args.calendar)) return;
     if (!args.item?.isEvent?.()) return; // event creation/editing, not tasks
@@ -193,7 +415,7 @@ function addEmailUI(win, cleanup) {
     }
 
     const panel = doc.createElementNS(HTML_NS, "div");
-    panel.id = "valarm04-email-panel";
+    panel.id = "valarm05-email-panel";
     panel.style.cssText = "border:1px solid ThreeDShadow; margin:7px 6px 4px; padding:9px; border-radius:4px; background:Field; color:FieldText; min-width:300px; box-sizing:border-box";
     const heading = doc.createElementNS(HTML_NS, "strong");
     heading.textContent = "Email alarm (CalDAV)";

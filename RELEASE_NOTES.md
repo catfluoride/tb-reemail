@@ -1,12 +1,7 @@
-## tb-reemail v0.4.0 — experimental developer prototype
+# tb-reemail v0.5.0 — experimental
 
-Source code and the installable Thunderbird/Betterbird XPI for CalDAV EMAIL VALARM editing.
+New **Email reminder…** entry in the event editor's native Reminder dropdown for writable CalDAV calendars. Configure recipients, lead time, subject and body inline, without entering Custom.
 
-- Adds a **Send an Email** option to Thunderbird's native reminder dialog for writable CalDAV event calendars.
-- Adds recipient, subject, and message fields.
-- Attempts to keep `ACTION:EMAIL` alarms when the event is saved.
-- Existing display/popup alarms are retained.
+Retains native Custom alarm functionality, including combined DISPLAY and EMAIL alarms; restores EMAIL after Thunderbird's native save filter. Existing single whole-minute pre-start EMAIL alarms map to the new shortcut when reopened.
 
-**Known limitation:** This release has passed local syntax and simulated tests but has **not** been tested in a live Thunderbird/Betterbird process, nor verified against a CalDAV server. The server must support `ACTION:EMAIL` to deliver the alarm; this add-on does not send mail. Some servers may reject or strip EMAIL alarms.
-
-**Security:** Uses privileged Thunderbird Experiment APIs; review the source before installing.
+**Important:** This build passes local simulated tests but has not been validated in a running Thunderbird/Betterbird instance or against any CalDAV server. The CalDAV server must actually send EMAIL alarms. Uses privileged Experiment APIs requiring unrestricted permissions.

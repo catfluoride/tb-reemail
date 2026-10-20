@@ -87,7 +87,7 @@ selector.value = 'none';
 item.alarms = [alarm('DISPLAY')];
 assert.equal(win.saveItem().getAlarms().length, 1, 'no email restoration after user changes reminder to none');
 cleanup.get(win)();
-assert.equal(win.__valarm04EditorPatch, undefined);
+assert.equal(win.__valarm05EditorPatch, undefined);
 // Extension registration is compatible with v0.3.1's verified API pattern.
 const ext = new api.valarmEditor();
 const result = ext.getAPI({extension:{id:'test@local'}}).valarmEditor.install();
