@@ -1,4 +1,4 @@
-/* CalDAV Email VALARM Editor 0.4.0 - MPL 2.0
+/* CalDAV Email VALARM Editor 0.4.0 - GPL-3.0-only
  * MailExtension Experiment for Betterbird / Thunderbird.
  * Does not send email, alter credentials, or contact servers directly.
  * Based on the native 2026 calendar reminder dialog and editor save paths.
