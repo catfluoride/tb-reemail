@@ -1,10 +1,17 @@
 # tb-reemail
 
-**Thunderbird / Betterbird CalDAV email reminders.** Version **0.5.0** (experimental; Thunderbird 140+).
+**Thunderbird / Betterbird CalDAV email reminders.** Version **0.5.1** (experimental; Thunderbird 140+).
 
 This MailExtension Experiment exposes the native iCalendar `VALARM` action `EMAIL` for writable CalDAV event calendars. It creates RFC 5545 email alarms in the event; **your CalDAV server must deliver the emails**. It does not send mail directly.
 
-## What's new in v0.5.0
+## What's new in v0.5.1
+
+- Switching from **Email reminder…** to **Custom…** carries your current recipients, lead time, subject and message into the dialog. Add a popup alarm there without losing the email reminder.
+- Blank lead times are rejected; explicit **0** means at event start. Invalid drafts block Save, including Save from the close prompt, while Discard and Cancel remain available.
+- The EMAIL shortcut no longer participates in Thunderbird's native DISPLAY preset matching.
+- A tested, reproducible build produces the XPI and checksum directly from current source. Publishing uses the manifest version and never overwrites an existing release.
+
+## Reminder workflow
 
 The event editor's **Reminder** dropdown now includes **Email reminder…**. You can configure a single email reminder directly in the editor without navigating through **Custom…**.
 
@@ -18,10 +25,10 @@ The existing **Custom…** dialog is still available for combining popup and ema
 
 ## Installation
 
-1. Download `tb-reemail-0.5.0.xpi`.
+1. Download `tb-reemail-0.5.1.xpi` from [GitHub Releases](https://github.com/catfluoride/tb-reemail/releases/tag/v0.5.1), along with its `.sha256` file if you want to verify the download.
 2. Thunderbird/Betterbird → **Add-ons and Themes** (`Ctrl+Shift+A`) → gear → **Install Add-on From File…**.
 3. Choose the XPI, review the unrestricted-access permission and restart Thunderbird/Betterbird.
-4. Disable or replace v0.4.0; this package uses the same extension ID, so Thunderbird should treat it as an update.
+4. This package uses the same extension ID as earlier releases, so Thunderbird should treat it as an update.
 
 The extension needs privileged Thunderbird internals; its unrestricted-access permission is inherent to a MailExtension Experiment. Review the source before installing.
 
@@ -33,7 +40,7 @@ The extension needs privileged Thunderbird internals; its unrestricted-access pe
 4. Save the event. Invalid recipient addresses or out-of-range lead times block the editor's Save and Save & Close commands.
 5. Reopen the event to check the setting. If possible, inspect the server's `.ics` representation to verify that it contains `BEGIN:VALARM`, `ACTION:EMAIL`, `SUMMARY`, `DESCRIPTION`, and one or more `ATTENDEE:mailto:` entries.
 
-Normal DISPLAY reminders remain available. If you need **both** a popup and an email alarm, use **Reminder → Custom…** and add a second alarm in the native reminder dialog.
+Normal DISPLAY reminders remain available. If you need **both** a popup and an email alarm, configure the inline email reminder, then choose **Reminder → Custom…** and add a second alarm in the native reminder dialog. Your email settings are transferred before Custom opens; cancelling Custom returns to the inline reminder. Choosing **None** removes reminders when you save.
 
 ## What it does not do
 
@@ -62,13 +69,19 @@ node tests/test.cjs
 node tests/quick.cjs
 ```
 
-Package from the project root:
+Build from the project root (Python 3 and Node.js required; no dependencies to install). This runs the tests, packages only the extension files plus README/license, verifies ZIP integrity and source equality, and writes a SHA-256 checksum:
 
 ```bash
-zip -r tb-reemail-0.5.0.xpi manifest.json background.js api/ README.md LICENSE
+python3 scripts/build.py
+cd dist
+sha256sum -c tb-reemail-0.5.1.xpi.sha256
 ```
 
-**Test status**: syntax checks and mocked behavior tests pass. This exact version has *not* been tested in a live Thunderbird/Betterbird or against a CalDAV server. Test on disposable events before using it for important reminders.
+The output is `dist/tb-reemail-0.5.1.xpi` and its `.sha256` file. Builds use a fixed file list, order, timestamps and permissions; repeated builds on the same toolchain are byte-identical. GitHub Actions verifies this, builds on pull requests, and creates an experimental prerelease for a new manifest version pushed to `main`. Existing releases are left unchanged. For an authenticated maintainer publishing a clean commit already on GitHub, `bash scripts/publish.sh` performs the same tests/build and creates the prerelease. The root `publish.sh` delegates to it.
+
+**Test status (v0.5.1)**: syntax checks and mocked behavior tests pass, including quick creation/reopening, Custom handoff/cancellation, invalid Save/Save & Close/close-prompt behavior, alarm removal, duplicate prevention, CalDAV restrictions and cleanup. Package contents, checksum and repeat-build identity are verified. Hooks were checked against the [Thunderbird ESR 140 editor](https://github.com/thunderbird/thunderbird-desktop/blob/esr140/calendar/base/content/item-editing/calendar-item-iframe.js) and [reminder functions](https://github.com/thunderbird/thunderbird-desktop/blob/esr140/calendar/base/content/dialogs/calendar-dialog-utils.js). This exact version has *not* been tested in a live Thunderbird/Betterbird or against a CalDAV server.
+
+Before relying on it, use disposable events to check: create and reopen a quick EMAIL alarm; move it to Custom and add DISPLAY; cancel Custom; try invalid recipients/blank lead time; save then synchronize and reopen; choose None and confirm removal. Inspect the server's `.ics` after synchronization and confirm actual email delivery. A successful local build cannot verify server delivery.
 
 ## License
 

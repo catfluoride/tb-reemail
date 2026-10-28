@@ -56,10 +56,24 @@ function scenario(existing=[]){
     createElementNS:(ns,tag)=>new El(tag)};
   const item={calendar:cal,alarms:existing,getAlarms(){return this.alarms},addAlarm(a){this.alarms.push(a)}};
   const old={calendar:cal, getAlarms(){return existing},isEvent(){return true},title:'Meeting'};
-  let saves=0, accepts=0;
+  let saves=0, accepts=0, customOpened=0, cancelCustom=false, closeChoice='cancel';
   const win={document:doc,calendarItem:old,getCurrentCalendar(){return cal},
     createReminderFromMenuitem(node){const a=mkAlarm();a.offset.inSeconds=-60*Number(node.getAttribute('length'));return a;},
     onCommandSave(){saves++},onAccept(){accepts++},
+    isItemChanged(){this.saveItem();return true},
+    onCommandCancel(){
+      if(!this.isItemChanged())return true;
+      if(closeChoice==='save'){this.onCommandSave(true);return true}
+      return closeChoice==='discard';
+    },
+    updateReminder(){
+      if(selector.value==='custom') {
+        customOpened++;
+        if(cancelCustom) selector.selectedItem=popup.children.find(x=>x.id==='tb-reemail-shortcut');
+      }
+      selector.setAttribute('last-value',selector.value);
+      this.gLastAlarmSelection=selector.selectedIndex;
+    },
     saveItem(){item.alarms=[];return item},addEventListener(){},gLastAlarmSelection:0};
   Object.defineProperty(selector,'selectedItem',{get(){return this.selected},set(v){this.selected=v;this.value=v?.value||v?.getAttribute('value')||''}});
   Object.defineProperty(selector,'selectedIndex',{get(){return popup.children.indexOf(this.selected)},set(v){this.selected=popup.children[v];this.value=this.selected?.value||''}});
@@ -67,7 +81,9 @@ function scenario(existing=[]){
   assert.equal(helper.patchEditor(win,cleanup),true);
   assert.equal(helper.installQuickReminder(win,cleanup),true);
   assert.equal(helper.installQuickReminder(win,cleanup),true,'idempotent');
-  return {win,cal,item,selector,popup,anchor,saves:()=>saves,accepts:()=>accepts,cleanup};
+  return {win,cal,item,selector,popup,anchor,custom,saves:()=>saves,accepts:()=>accepts,
+    customOpened:()=>customOpened,cancelCustom:()=>{cancelCustom=true},
+    closeChoice:value=>{closeChoice=value},cleanup};
 }
 // New event: choose quick action directly in native Reminder dropdown.
 {
@@ -75,11 +91,12 @@ function scenario(existing=[]){
   const option=t.popup.children.find(x=>x.id==='tb-reemail-shortcut');
   assert.ok(option,'Email reminder inserted');
   assert.equal(option.getAttribute('value'),'tb-reemail');
-  t.selector.selectedItem=option;t.selector.emit('command');
+  t.selector.selectedItem=option;t.win.updateReminder();t.selector.emit('command');
   const panel=t.anchor.parentNode.children.find(x=>x.id==='tb-reemail-quick-fields');
   assert.equal(panel.style.display,'block');
   const inputs=panel.children.filter(x=>x.localName==='label').map(x=>x.children[1]);
   const [recipient,lead,subject,body]=inputs;
+  assert.equal(option.hasAttribute('length'),false,'shortcut cannot match a native DISPLAY preset');
   assert.equal(t.win.onCommandSave(),false,'invalid form blocks saving');
   assert.equal(t.saves(),0);
   recipient.value='someone@example.com';lead.value='45';subject.value='Note';body.value='Body';
@@ -91,9 +108,44 @@ function scenario(existing=[]){
   assert.match(a.icalString,/ATTENDEE:mailto:someone@example.com/);
   assert.equal(a.summary,'Note');assert.equal(a.description,'Body');
   t.win.saveItem();assert.equal(t.item.getAlarms().length,1,'no duplicate alarms on repeated saves');
+  for(const valid of ['0','129600']) {
+    lead.value=valid;
+    assert.equal(t.win.saveItem().getAlarms()[0].offset.inSeconds,-60*Number(valid));
+  }
+  for(const invalid of ['', ' ', '-1', '1.5', '129601']) {
+    lead.value=invalid;
+    assert.equal(t.win.onCommandSave(),false,`invalid lead ${JSON.stringify(invalid)} blocks Save`);
+    assert.equal(t.win.onAccept(),false,'invalid form blocks Save & Close');
+  }
+  assert.equal(t.win.isItemChanged(),true,'invalid draft is detected without serialization');
+  t.closeChoice('save');assert.equal(t.win.onCommandCancel(),false,'Save from close prompt cannot discard invalid draft');
+  t.closeChoice('discard');assert.equal(t.win.onCommandCancel(),true,'invalid draft can be discarded');
+  t.closeChoice('cancel');assert.equal(t.win.onCommandCancel(),false,'close prompt can be cancelled');
+  t.selector.selectedItem=t.custom;
+  assert.equal(t.win.updateReminder(),false,'invalid shortcut cannot be lost when opening Custom');
+  assert.equal(t.customOpened(),0);
+  assert.equal(t.selector.value,'tb-reemail');
+  lead.value='45';
+  t.selector.selectedItem=t.custom;t.win.updateReminder();
+  assert.equal(t.customOpened(),1);
+  assert.equal(t.custom.reminders[0].offset.inSeconds,-2700);
+  assert.equal(t.custom.reminders[0].summary,'Note');
+  assert.equal(t.custom.reminders[0].description,'Body');
+  assert.equal(t.custom.reminders[0].getAttendees()[0].id,'mailto:someone@example.com');
+  assert.notEqual(t.custom.reminders[0],option.reminders[0],'Custom receives a detached clone');
+  const popupAlarm=mkAlarm('DISPLAY');t.custom.reminders.push(popupAlarm);
+  assert.equal(t.win.saveItem().getAlarms().filter(x=>x.action==='EMAIL').length,1,'email survives Custom save');
+  // Returning to the shortcut then cancelling Custom keeps the form available.
+  t.selector.selectedItem=option;t.win.updateReminder();t.cancelCustom();
+  t.selector.selectedItem=t.custom;t.win.updateReminder();
+  assert.equal(t.selector.value,'tb-reemail');assert.equal(panel.style.display,'block');
   t.selector.selectedItem=t.popup.children[0];t.selector.emit('command');
   assert.equal(panel.style.display,'none');
-  assert.ok(t.win.saveItem());
+  assert.equal(t.win.saveItem().getAlarms().length,0,'None removes email alarms');
+  t.cleanup.get(t.win)();
+  assert.equal(t.win.__valarm05Quick,undefined);
+  assert.equal(t.win.__valarm05EditorPatch,undefined);
+  assert.ok(!t.popup.children.includes(option),'cleanup removes shortcut');
 }
 // Reopened event: restore shortcut selection only for supported email alarms.
 {
@@ -106,5 +158,5 @@ function scenario(existing=[]){
   const multi=scenario([a,mkAlarm('DISPLAY')]);
   assert.equal(multi.selector.value,'none','multi alarm stays in native Custom');
 }
-assert.throws(()=>helper.createQuickAlarm({createReminderFromMenuitem:()=>mkAlarm()},new El('menuitem'),{recipients:'test@example.org',lead:'129601'},'x',mockCal()),/Lead time/);
+assert.throws(()=>helper.createQuickAlarm({createReminderFromMenuitem:()=>mkAlarm()},{recipients:'test@example.org',lead:'129601'},'x',mockCal()),/Lead time/);
 console.log('PASS: quick-menu insertion, visible editor form, validation, save, no duplication, reopened alarm, nonconvertible alarms');

@@ -1,4 +1,4 @@
-/* CalDAV Email VALARM Editor 0.5.0 - GPL-3.0-only
+/* CalDAV Email VALARM Editor 0.5.1 - GPL-3.0-only
  * MailExtension Experiment for Betterbird / Thunderbird.
  * Does not send email, alter credentials, or contact servers directly.
  * Based on the native 2026 calendar reminder dialog and editor save paths.
@@ -136,22 +136,25 @@ function patchEditor(win, cleanup) {
 }
 
 /** Build one valid EMAIL alarm from the editor's quick fields. */
-function createQuickAlarm(win, menuitem, data, title, calendar) {
+function createQuickAlarm(win, data, title, calendar) {
   if (!writableCalDAV(calendar)) throw new Error("Select a writable CalDAV calendar.");
   const lead = Number(data.lead);
-  if (!Number.isSafeInteger(lead) || lead < 0 || lead > MAX_LEAD_MINUTES) {
+  if (!String(data.lead ?? "").trim() || !Number.isSafeInteger(lead) || lead < 0 || lead > MAX_LEAD_MINUTES) {
     throw new Error("Lead time must be between 0 and 129600 minutes (90 days).");
   }
   // This is Thunderbird's own preset creator, giving the correct calIDuration
   // and START/END relation. EMAIL is set after it creates a DISPLAY alarm.
-  menuitem.setAttribute("unit", "minutes");
-  menuitem.setAttribute("length", String(lead));
-  menuitem.setAttribute("origin", "before");
-  menuitem.setAttribute("relation", "START");
+  // Never give the visible shortcut preset attributes: the native matcher
+  // would then mistake a DISPLAY alarm with the same offset for this EMAIL UI.
+  const preset = win.document.createElementNS(XUL_NS, "menuitem");
+  preset.setAttribute("unit", "minutes");
+  preset.setAttribute("length", String(lead));
+  preset.setAttribute("origin", "before");
+  preset.setAttribute("relation", "START");
   if (typeof win.createReminderFromMenuitem !== "function") {
     throw new Error("Thunderbird preset alarm creator is unavailable.");
   }
-  const alarm = win.createReminderFromMenuitem(menuitem, calendar);
+  const alarm = win.createReminderFromMenuitem(preset, calendar);
   return applyEmailFields(alarm, data, title);
 }
 
@@ -184,10 +187,6 @@ function installQuickReminder(win, cleanup) {
     item.id = QUICK_ID;
     item.setAttribute("label", "Email reminder…");
     item.setAttribute("value", QUICK_VALUE);
-    item.setAttribute("unit", "minutes");
-    item.setAttribute("length", "15");
-    item.setAttribute("origin", "before");
-    item.setAttribute("relation", "START");
     item.reminders = [];
     popup.insertBefore(item, custom); // just before Custom…, leave native presets intact
 
@@ -231,14 +230,13 @@ function installQuickReminder(win, cleanup) {
     const anchor = doc.getElementById("event-grid-alarm-picker-box") || selector.parentNode;
     anchor.parentNode.insertBefore(box, anchor.nextSibling);
 
-    let lastCalendar = null;
     const calendar = () => typeof win.getCurrentCalendar === "function"
       ? win.getCurrentCalendar() : win.calendarItem?.calendar;
     const read = () => ({recipients:recipients.value, lead:lead.value, subject:subject.value, body:body.value});
-    function prepare(showError = false) {
-      if (selector.value !== QUICK_VALUE) return true;
+    function prepare(showError = false, force = false) {
+      if (selector.value !== QUICK_VALUE && !force) return true;
       try {
-        item.reminders = [createQuickAlarm(win, item, read(),
+        item.reminders = [createQuickAlarm(win, read(),
           doc.getElementById("item-title")?.value || win.calendarItem?.title, calendar())];
         status.textContent = "";
         return true;
@@ -271,6 +269,7 @@ function installQuickReminder(win, cleanup) {
         item.reminders = [existing.clone()];
         selector.selectedItem = item;
         selector.value = QUICK_VALUE;
+        selector.setAttribute("last-value", QUICK_VALUE);
         win.gLastAlarmSelection = selector.selectedIndex;
         console.info(TAG, "Recognized saved EMAIL reminder in main dropdown");
       }
@@ -286,12 +285,7 @@ function installQuickReminder(win, cleanup) {
       box.style.display = writable && selector.value === QUICK_VALUE ? "block" : "none";
       if (selector.value === QUICK_VALUE && writable) prepare(false);
     }
-    const onCommand = () => {
-      if (selector.value === QUICK_VALUE && lastCalendar !== calendar()) {
-        lastCalendar = calendar();
-      }
-      show();
-    };
+    const onCommand = () => show();
     const onInput = () => prepare(false);
     selector.addEventListener("command", onCommand);
     for (const field of [recipients, lead, subject, body]) field.addEventListener("input", onInput);
@@ -302,9 +296,31 @@ function installQuickReminder(win, cleanup) {
     // onAccept() otherwise disposes the editor even if saveItem() throws.
     const originalSaveCommand = win.onCommandSave;
     const originalAccept = win.onAccept;
+    const originalItemChanged = win.isItemChanged;
+    const originalCancel = win.onCommandCancel;
+    let invalidSaveAttempt = false;
+    // Native updateReminder opens Custom synchronously, before command event
+    // listeners run. Transfer the current draft before that dialog is opened.
+    const originalUpdateReminder = win.updateReminder;
+    const patchedUpdateReminder = function (...args) {
+      if (selector.value === "custom" &&
+          selector.getAttribute("last-value") === QUICK_VALUE && writableCalDAV(calendar())) {
+        if (!prepare(true, true)) {
+          selector.selectedItem = item;
+          show();
+          prepare(true);
+          return false;
+        }
+        custom.reminders = item.reminders.map(alarm => alarm.clone());
+      }
+      const result = originalUpdateReminder.apply(this, args);
+      show(); // Includes cancellation of the modal Custom dialog.
+      return result;
+    };
+    if (typeof originalUpdateReminder === "function") win.updateReminder = patchedUpdateReminder;
     if (typeof originalSaveCommand === "function") {
       win.onCommandSave = function (...args) {
-        if (!prepare(true)) return false;
+        if (!prepare(true)) { invalidSaveAttempt = true; return false; }
         return originalSaveCommand.apply(this, args);
       };
     }
@@ -312,6 +328,21 @@ function installQuickReminder(win, cleanup) {
       win.onAccept = function (...args) {
         if (!prepare(true)) return false;
         return originalAccept.apply(this, args);
+      };
+    }
+    // The native close prompt calls saveItem() to detect changes, and assumes
+    // onCommandSave always succeeds. Keep Discard available for an invalid
+    // draft, while a failed Save from that prompt must leave the editor open.
+    if (typeof originalItemChanged === "function") {
+      win.isItemChanged = function (...args) {
+        return !prepare(false) || originalItemChanged.apply(this, args);
+      };
+    }
+    if (typeof originalCancel === "function") {
+      win.onCommandCancel = function (...args) {
+        invalidSaveAttempt = false;
+        const result = originalCancel.apply(this, args);
+        return invalidSaveAttempt ? false : result;
       };
     }
     const quick = {prepare, show, syncFromItem};
@@ -322,6 +353,9 @@ function installQuickReminder(win, cleanup) {
       calendarPicker?.removeEventListener("command", show);
       if (win.onCommandSave !== originalSaveCommand) win.onCommandSave = originalSaveCommand;
       if (win.onAccept !== originalAccept) win.onAccept = originalAccept;
+      if (win.isItemChanged !== originalItemChanged) win.isItemChanged = originalItemChanged;
+      if (win.onCommandCancel !== originalCancel) win.onCommandCancel = originalCancel;
+      if (win.updateReminder === patchedUpdateReminder) win.updateReminder = originalUpdateReminder;
       delete win.__valarm05Quick;
       box.remove();
       item.remove();
@@ -330,6 +364,8 @@ function installQuickReminder(win, cleanup) {
     cleanup.set(win, () => {dispose(); prior?.();});
     win.addEventListener("unload", dispose, {once: true});
     syncFromItem();
+    // Inserting before Custom shifts its index even when it stays selected.
+    win.gLastAlarmSelection = selector.selectedIndex;
     console.info(TAG, "Email reminder shortcut installed in main editor dropdown");
     return true;
   } catch (e) {

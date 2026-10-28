@@ -1,37 +1,57 @@
-name: Publish experimental XPI v0.5.0
+name: Build and publish experimental XPI
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'dist/tb-reemail-0.5.0.xpi'
-      - 'dist/tb-reemail-0.5.0.xpi.sha256'
+  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: xpi-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-      - name: Validate JavaScript and tests
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test and build XPI from source
+        run: python3 scripts/build.py
+      - name: Verify reproducibility and checksum
         run: |
-          node --check background.js
-          node --check api/implementation.js
-          node tests/test.cjs
-          node tests/quick.cjs
-      - name: Verify published XPI checksum
-        run: cd dist && sha256sum -c tb-reemail-0.5.0.xpi.sha256
-      - name: Publish or update v0.5.0 prerelease
+          version=$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')
+          cp "dist/tb-reemail-$version.xpi" /tmp/first.xpi
+          python3 scripts/build.py
+          cmp /tmp/first.xpi "dist/tb-reemail-$version.xpi"
+          (cd dist && sha256sum -c "tb-reemail-$version.xpi.sha256")
+
+  release:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build and publish a new version as a prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view v0.5.0 >/dev/null 2>&1; then
-            gh release upload v0.5.0 --clobber dist/tb-reemail-0.5.0.xpi dist/tb-reemail-0.5.0.xpi.sha256
-          else
-            gh release create v0.5.0 dist/tb-reemail-0.5.0.xpi dist/tb-reemail-0.5.0.xpi.sha256 --target "$GITHUB_SHA" --prerelease --title "v0.5.0 (experimental)" --notes-file RELEASE_NOTES.md
+          version=$(python3 -c 'import json; print(json.load(open("manifest.json"))["version"])')
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Release v$version already exists; leaving it unchanged."
+            exit 0
           fi
+          python3 scripts/build.py
+          gh release create "v$version" "dist/tb-reemail-$version.xpi" "dist/tb-reemail-$version.xpi.sha256" \
+            --target "$GITHUB_SHA" --prerelease --title "v$version (experimental)" --notes-file RELEASE_NOTES.md
