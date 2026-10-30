@@ -1,0 +1,81 @@
+name: Promote v0.5.1 to stable
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/promote-v0.5.1.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote-v0.5.1
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'catfluoride/tb-reemail' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.5.1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify the original source and published release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = a67e2f7ca3a8c1c1bdd5573c3c2ac6c786916800
+          gh api repos/catfluoride/tb-reemail/releases/427006796 > "$RUNNER_TEMP/release.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          release = json.loads((Path(os.environ['RUNNER_TEMP']) / 'release.json').read_text())
+          assert release['tag_name'] == 'v0.5.1'
+          assert not release['draft']
+          assert release['target_commitish'] == 'a67e2f7ca3a8c1c1bdd5573c3c2ac6c786916800'
+          expected = {
+              'tb-reemail-0.5.1.xpi': 'sha256:3a035209c3f5c3a55e0a34d50d947490ac8c5e15d6a56fa77654779aea4f1fcf',
+              'tb-reemail-0.5.1.xpi.sha256': 'sha256:30a7afa1dbe1ec9d4d35ffad8941757c15935639b5ce9954f37c0545192d6213',
+          }
+          assert {a['name']: a['digest'] for a in release['assets']} == expected
+          assert all(a['state'] == 'uploaded' for a in release['assets'])
+          PY
+      - name: Test, reproduce and compare the published XPI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: catfluoride/tb-reemail
+        run: |
+          set -euo pipefail
+          python3 scripts/build.py
+          cp dist/tb-reemail-0.5.1.xpi "$RUNNER_TEMP/first.xpi"
+          python3 scripts/build.py
+          cmp "$RUNNER_TEMP/first.xpi" dist/tb-reemail-0.5.1.xpi
+          gh release download v0.5.1 --pattern 'tb-reemail-0.5.1.xpi*' --dir "$RUNNER_TEMP/published"
+          (cd "$RUNNER_TEMP/published" && sha256sum -c tb-reemail-0.5.1.xpi.sha256)
+          cmp dist/tb-reemail-0.5.1.xpi "$RUNNER_TEMP/published/tb-reemail-0.5.1.xpi"
+          cmp dist/tb-reemail-0.5.1.xpi.sha256 "$RUNNER_TEMP/published/tb-reemail-0.5.1.xpi.sha256"
+
+  promote:
+    needs: verify
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Promote the verified release and check latest status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: catfluoride/tb-reemail
+        run: |
+          set -euo pipefail
+          gh release edit v0.5.1 --prerelease=false --latest --title 'v0.5.1' --notes-file RELEASE_NOTES.md
+          test "$(gh api repos/catfluoride/tb-reemail/releases/latest --jq '.id == 427006796 and .tag_name == "v0.5.1" and .draft == false and .prerelease == false')" = true
+          gh release view v0.5.1 --json url,name,isDraft,isPrerelease

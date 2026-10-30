@@ -1,4 +1,6 @@
-# tb-reemail v0.5.1 — experimental
+# tb-reemail v0.5.1 — stable
+
+Official stable release. Promoted from the v0.5.1 prerelease without changing its source tag, XPI or checksum.
 
 Completes the existing direct **Email reminder…** workflow for writable CalDAV event calendars:
 
@@ -7,6 +9,6 @@ Completes the existing direct **Email reminder…** workflow for writable CalDAV
 - Keep invalid drafts open when Save is chosen from the close prompt; allow Discard and Cancel.
 - Prevent native DISPLAY reminders from matching the EMAIL shortcut as a numeric preset.
 - Build the XPI reproducibly from current source, run regression tests, verify package contents and include a SHA-256 checksum.
-- Replace obsolete publishing scripts and publish new versions as prereleases without overwriting existing releases.
+- Replace obsolete publishing scripts and build new versions as prereleases by default; v0.5.1 is promoted to stable after verifying the original published assets.
 
 **Validation:** local JavaScript syntax and mocked behavior tests pass, including Custom handoff/cancellation and invalid-draft closing. Package contents, checksum and repeat-build identity are checked. No live Thunderbird/Betterbird UI or CalDAV delivery test was possible in the build environment. The CalDAV server must preserve and deliver EMAIL alarms; this extension does not send mail. Requires Thunderbird/Betterbird 140+ and privileged Experiment APIs.

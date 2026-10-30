@@ -1,6 +1,8 @@
 # tb-reemail
 
-**Thunderbird / Betterbird CalDAV email reminders.** Version **0.5.1** (experimental; Thunderbird 140+).
+**Thunderbird / Betterbird CalDAV email reminders.** Official stable release: **0.5.1** (Thunderbird 140+).
+
+The stable release retains the original v0.5.1 tag, XPI and SHA-256 checksum. Its bundled README records the original prerelease status; current release status is shown on [GitHub Releases](https://github.com/catfluoride/tb-reemail/releases/tag/v0.5.1). The live Thunderbird/Betterbird and CalDAV testing limitations below still apply.
 
 This MailExtension Experiment exposes the native iCalendar `VALARM` action `EMAIL` for writable CalDAV event calendars. It creates RFC 5545 email alarms in the event; **your CalDAV server must deliver the emails**. It does not send mail directly.
 
@@ -58,7 +60,7 @@ Normal DISPLAY reminders remain available. If you need **both** a popup and an e
 
 ## Development and testing
 
-The project is **entirely vibe coded**. [ChatGPT (OpenAI)](https://chatgpt.com/) contributed code, tests, packaging and documentation, guided by [@catfluoride](https://github.com/catfluoride), who specified requirements and tested earlier builds. It is experimental and not independently audited. **If you don't like it, you can just ignore it.**
+The project is **entirely vibe coded**. [ChatGPT (OpenAI)](https://chatgpt.com/) contributed code, tests, packaging and documentation, guided by [@catfluoride](https://github.com/catfluoride), who specified requirements and tested earlier builds. It is not independently audited. **If you don't like it, you can just ignore it.**
 
 Source tests:
 
@@ -78,6 +80,8 @@ sha256sum -c tb-reemail-0.5.1.xpi.sha256
 ```
 
 The output is `dist/tb-reemail-0.5.1.xpi` and its `.sha256` file. Builds use a fixed file list, order, timestamps and permissions; repeated builds on the same toolchain are byte-identical. GitHub Actions verifies this, builds on pull requests, and creates an experimental prerelease for a new manifest version pushed to `main`. Existing releases are left unchanged. For an authenticated maintainer publishing a clean commit already on GitHub, `bash scripts/publish.sh` performs the same tests/build and creates the prerelease. The root `publish.sh` delegates to it.
+
+For the published v0.5.1 package, build the original tag (`git switch --detach v0.5.1`); the updated release documentation on `main` changes the README bundled by a new build. The dedicated **Promote v0.5.1 to stable** workflow verifies that tag's commit, tests, reproducibility and byte-for-byte identity with the published assets before marking the release stable and latest. It preserves the tag and assets. Future versions continue to default to prereleases.
 
 **Test status (v0.5.1)**: syntax checks and mocked behavior tests pass, including quick creation/reopening, Custom handoff/cancellation, invalid Save/Save & Close/close-prompt behavior, alarm removal, duplicate prevention, CalDAV restrictions and cleanup. Package contents, checksum and repeat-build identity are verified. Hooks were checked against the [Thunderbird ESR 140 editor](https://github.com/thunderbird/thunderbird-desktop/blob/esr140/calendar/base/content/item-editing/calendar-item-iframe.js) and [reminder functions](https://github.com/thunderbird/thunderbird-desktop/blob/esr140/calendar/base/content/dialogs/calendar-dialog-utils.js). This exact version has *not* been tested in a live Thunderbird/Betterbird or against a CalDAV server.
 
